@@ -1,14 +1,17 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
-import cors from 'cors';
 import mongoose from 'mongoose';
 import { GoogleGenAI, Type } from '@google/genai';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
-app.use(cors());
+const clientBuildPath = fileURLToPath(new URL('../dist', import.meta.url));
 app.use(express.json({ limit: '20kb' }));
+
+app.get('/healthz', (req, res) => res.status(200).json({ status: 'ok' }));
 
 const suspectSchema = new mongoose.Schema({
   id: { type: String, required: true }, name: String, role: String, motive: String,
@@ -160,6 +163,14 @@ app.get('/api/mysteries/:id/result', async (req, res) => {
   res.json(privateResult(mystery));
 });
 
+app.use(express.static(clientBuildPath));
+app.get('/{*path}', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Route not found.' });
+  return res.sendFile(path.join(clientBuildPath, 'index.html'), (error) => {
+    if (error) next(error);
+  });
+});
+
 app.use((err, req, res, next) => {
   console.error(err.message);
   res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -169,9 +180,15 @@ try {
   if (process.env.MONGODB_URI) {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB.');
+  } else if (process.env.NODE_ENV === 'production') {
+    throw new Error('MONGODB_URI is required in production.');
   } else console.warn('MONGODB_URI is not set. Using temporary in-memory storage.');
 } catch (error) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('MongoDB connection is required in production:', error.message);
+    process.exit(1);
+  }
   console.error('MongoDB connection failed; using temporary in-memory storage:', error.message);
 }
 
-app.listen(port, () => console.log(`Mystery Room API listening on http://localhost:${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`Mystery Room listening on port ${port}`));
